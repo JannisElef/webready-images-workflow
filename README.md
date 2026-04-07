@@ -429,19 +429,3 @@ assets/
       blog/
         header-web.jpg
 ```
-
-## Contributing
-
-Improvements are welcome.
-
-Possible future enhancements:
-
-- optional WebP output
-- configurable background color for transparent images
-- exclude/include glob patterns
-- resize presets
-- optimization report in workflow summary
-
-## License
-
-Add your preferred license here.
