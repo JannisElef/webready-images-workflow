@@ -23,6 +23,14 @@ on:
         required: false
         type: string
         default: "-web"
+      max-width:
+        description: "Max width in px"
+        required: false
+        type: number
+      max-height:
+        description: "Max height in px"
+        required: false
+        type: number
 
 jobs:
   generate:
@@ -43,16 +51,16 @@ jobs:
           node-version: "20"
 
       - name: Install sharp
-        shell: bash
         run: npm install sharp@0.34.5 --no-save --no-fund --no-audit
 
       - name: Generate webready images
-        shell: bash
         env:
           SOURCE_DIR: ${{ inputs.source-dir }}
           OUTPUT_DIR: ${{ inputs.output-dir }}
           QUALITY: ${{ inputs.quality }}
           SUFFIX: ${{ inputs.suffix }}
+          MAX_WIDTH: ${{ inputs.max-width }}
+          MAX_HEIGHT: ${{ inputs.max-height }}
         run: |
           node <<'EOF'
           const fs = require("node:fs/promises");
@@ -69,21 +77,12 @@ jobs:
             ? Math.min(100, Math.max(1, parsedQuality))
             : 80;
 
-          const supportedExtensions = new Set([
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".webp",
-            ".avif",
-            ".tif",
-            ".tiff",
-            ".gif"
-          ]);
+          const maxWidth = Number.parseInt(process.env.MAX_WIDTH || "", 10);
+          const maxHeight = Number.parseInt(process.env.MAX_HEIGHT || "", 10);
 
-          function isSubPath(targetPath, parentPath) {
-            const rel = path.relative(parentPath, targetPath);
-            return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-          }
+          const supportedExtensions = new Set([
+            ".png", ".jpg", ".jpeg", ".webp", ".avif", ".tif", ".tiff", ".gif"
+          ]);
 
           async function pathExists(target) {
             try {
@@ -96,13 +95,9 @@ jobs:
 
           async function* walk(dir) {
             const entries = await fs.readdir(dir, { withFileTypes: true });
-
             for (const entry of entries) {
               const fullPath = path.join(dir, entry.name);
-
-              if (isSubPath(fullPath, outputDir)) {
-                continue;
-              }
+              if (fullPath.startsWith(outputDir)) continue;
 
               if (entry.isDirectory()) {
                 yield* walk(fullPath);
@@ -126,41 +121,25 @@ jobs:
           async function generateImage(inputFile, outputFile) {
             await ensureDir(path.dirname(outputFile));
 
-            await sharp(inputFile)
+            let pipeline = sharp(inputFile)
               .rotate()
-              .flatten({ background: "#ffffff" })
+              .flatten({ background: "#ffffff" });
+
+            if (Number.isFinite(maxWidth) || Number.isFinite(maxHeight)) {
+              pipeline = pipeline.resize({
+                width: Number.isFinite(maxWidth) ? maxWidth : null,
+                height: Number.isFinite(maxHeight) ? maxHeight : null,
+                fit: "inside",
+                withoutEnlargement: true
+              });
+            }
+
+            await pipeline
               .jpeg({
                 quality,
                 mozjpeg: true
               })
               .toFile(outputFile);
-          }
-
-          async function collectGeneratedCandidates(dir, result = []) {
-            if (!(await pathExists(dir))) {
-              return result;
-            }
-
-            const entries = await fs.readdir(dir, { withFileTypes: true });
-
-            for (const entry of entries) {
-              const fullPath = path.join(dir, entry.name);
-
-              if (entry.isDirectory()) {
-                await collectGeneratedCandidates(fullPath, result);
-                continue;
-              }
-
-              if (
-                entry.isFile() &&
-                path.extname(entry.name).toLowerCase() === ".jpg" &&
-                entry.name.endsWith(`${suffix}.jpg`)
-              ) {
-                result.push(fullPath);
-              }
-            }
-
-            return result;
           }
 
           async function main() {
@@ -171,18 +150,11 @@ jobs:
 
             await ensureDir(outputDir);
 
-            const expectedOutputs = new Set();
-            let changed = 0;
-            let skipped = 0;
-
             for await (const inputFile of walk(sourceDir)) {
               const ext = path.extname(inputFile).toLowerCase();
-              if (!supportedExtensions.has(ext)) {
-                continue;
-              }
+              if (!supportedExtensions.has(ext)) continue;
 
               const outputFile = buildOutputPath(inputFile);
-              expectedOutputs.add(outputFile);
 
               let shouldGenerate = true;
 
@@ -198,31 +170,14 @@ jobs:
               }
 
               if (shouldGenerate) {
-                console.log(`Generate: ${path.relative(workspace, inputFile)} -> ${path.relative(workspace, outputFile)}`);
+                console.log(`Generate: ${inputFile} -> ${outputFile}`);
                 await generateImage(inputFile, outputFile);
-                changed++;
               } else {
-                console.log(`Skip: ${path.relative(workspace, outputFile)}`);
-                skipped++;
+                console.log(`Skip: ${outputFile}`);
               }
             }
 
-            const existingGenerated = await collectGeneratedCandidates(outputDir);
-            let removed = 0;
-
-            for (const file of existingGenerated) {
-              if (!expectedOutputs.has(file)) {
-                console.log(`Remove stale: ${path.relative(workspace, file)}`);
-                await fs.unlink(file);
-                removed++;
-              }
-            }
-
-            console.log("");
             console.log("Done.");
-            console.log(`Changed: ${changed}`);
-            console.log(`Skipped: ${skipped}`);
-            console.log(`Removed stale: ${removed}`);
           }
 
           main().catch((error) => {
@@ -232,7 +187,6 @@ jobs:
           EOF
 
       - name: Commit generated images if needed
-        shell: bash
         run: |
           if [[ -n "$(git status --porcelain -- "${{ inputs.output-dir }}")" ]]; then
             git config user.name "github-actions[bot]"
