@@ -1,0 +1,5 @@
+git tag v1.2.0
+git push origin v1.2.0
+
+git tag -f v1
+git push -f origin v1
