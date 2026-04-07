@@ -93,7 +93,7 @@ The central workflow then:
 Create a repository, for example:
 
 ```text
-your-user-or-org/github-webready-images
+your-user-or-org/webready-images-workflow
 ```
 
 Add the reusable workflow file:
@@ -141,7 +141,7 @@ permissions:
 
 jobs:
   webready:
-    uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+    uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
     with:
       source-dir: assets/img
       output-dir: assets/img/web
@@ -152,7 +152,7 @@ jobs:
 Replace:
 
 - `your-user-or-org`
-- `github-webready-images`
+- `webready-images-workflow`
 
 with your actual repository path.
 
@@ -233,7 +233,7 @@ permissions:
 
 jobs:
   webready:
-    uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+    uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
 ```
 
 This works as long as the consumer repository uses the default folder structure:
@@ -262,7 +262,7 @@ permissions:
 
 jobs:
   webready:
-    uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+    uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
     with:
       source-dir: public/images
       output-dir: public/images/web
@@ -275,7 +275,7 @@ jobs:
 ```yaml
 jobs:
   webready:
-    uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+    uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
     with:
       suffix: -optimized
 ```
@@ -291,7 +291,7 @@ hero.png → hero-optimized.jpg
 ```yaml
 jobs:
   webready:
-    uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+    uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
     with:
       quality: 70
 ```
@@ -301,13 +301,13 @@ jobs:
 For convenience, reference a version tag:
 
 ```yaml
-uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@v1
+uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@v1
 ```
 
 For maximum stability, reference a full commit SHA instead:
 
 ```yaml
-uses: your-user-or-org/github-webready-images/.github/workflows/webready-images.yml@<commit-sha>
+uses: your-user-or-org/webready-images-workflow/.github/workflows/webready-images.yml@<commit-sha>
 ```
 
 ## Permissions
