@@ -4,32 +4,51 @@ on:
   workflow_call:
     inputs:
       source-dir:
-        description: "Source image directory"
-        required: false
         type: string
         default: "assets/img"
+
       output-dir:
-        description: "Output directory for generated web images"
-        required: false
         type: string
         default: "assets/img/web"
       quality:
-        description: "JPEG quality (1-100)"
-        required: false
         type: number
         default: 80
       suffix:
-        description: "Suffix appended before .jpg"
-        required: false
         type: string
         default: "-web"
       max-width:
-        description: "Max width in px"
-        required: false
         type: number
       max-height:
-        description: "Max height in px"
-        required: false
+        type: number
+
+      generate-smaller:
+        type: boolean
+        default: false
+      smaller-quality:
+        type: number
+        default: 65
+      smaller-suffix:
+        type: string
+        default: "-smaller"
+      smaller-max-width:
+        type: number
+        default: 512
+      smaller-max-height:
+        type: number
+        default: 512
+
+      generate-webp:
+        type: boolean
+        default: false
+      webp-quality:
+        type: number
+        default: 78
+      webp-suffix:
+        type: string
+        default: "-webp"
+      webp-max-width:
+        type: number
+      webp-max-height:
         type: number
 
 jobs:
@@ -53,14 +72,28 @@ jobs:
       - name: Install sharp
         run: npm install sharp@0.34.5 --no-save --no-fund --no-audit
 
-      - name: Generate webready images
+      - name: Generate image variants
         env:
           SOURCE_DIR: ${{ inputs.source-dir }}
+
           OUTPUT_DIR: ${{ inputs.output-dir }}
           QUALITY: ${{ inputs.quality }}
           SUFFIX: ${{ inputs.suffix }}
           MAX_WIDTH: ${{ inputs.max-width }}
           MAX_HEIGHT: ${{ inputs.max-height }}
+
+          GENERATE_SMALLER: ${{ inputs.generate-smaller }}
+          SMALLER_QUALITY: ${{ inputs.smaller-quality }}
+          SMALLER_SUFFIX: ${{ inputs.smaller-suffix }}
+          SMALLER_MAX_WIDTH: ${{ inputs.smaller-max-width }}
+          SMALLER_MAX_HEIGHT: ${{ inputs.smaller-max-height }}
+
+          GENERATE_WEBP: ${{ inputs.generate-webp }}
+          WEBP_QUALITY: ${{ inputs.webp-quality }}
+          WEBP_SUFFIX: ${{ inputs.webp-suffix }}
+          WEBP_MAX_WIDTH: ${{ inputs.webp-max-width }}
+          WEBP_MAX_HEIGHT: ${{ inputs.webp-max-height }}
+
         run: |
           node <<'EOF'
           const fs = require("node:fs/promises");
@@ -68,21 +101,54 @@ jobs:
           const sharp = require("sharp");
 
           const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-          const sourceDir = path.resolve(workspace, process.env.SOURCE_DIR || "assets/img");
-          const outputDir = path.resolve(workspace, process.env.OUTPUT_DIR || "assets/img/web");
-          const suffix = process.env.SUFFIX || "-web";
-
-          const parsedQuality = Number.parseInt(process.env.QUALITY || "80", 10);
-          const quality = Number.isFinite(parsedQuality)
-            ? Math.min(100, Math.max(1, parsedQuality))
-            : 80;
-
-          const maxWidth = Number.parseInt(process.env.MAX_WIDTH || "", 10);
-          const maxHeight = Number.parseInt(process.env.MAX_HEIGHT || "", 10);
+          const sourceDir = path.resolve(workspace, process.env.SOURCE_DIR);
+          const rootOutputDir = path.resolve(workspace, process.env.OUTPUT_DIR);
 
           const supportedExtensions = new Set([
             ".png", ".jpg", ".jpeg", ".webp", ".avif", ".tif", ".tiff", ".gif"
           ]);
+
+          function bool(v) {
+            return String(v).toLowerCase() === "true";
+          }
+
+          function num(v) {
+            const n = Number.parseInt(v || "", 10);
+            return Number.isFinite(n) ? n : null;
+          }
+
+          const variants = [
+            {
+              dir: rootOutputDir,
+              quality: num(process.env.QUALITY) || 80,
+              suffix: process.env.SUFFIX || "-web",
+              maxWidth: num(process.env.MAX_WIDTH),
+              maxHeight: num(process.env.MAX_HEIGHT),
+              format: "jpg"
+            }
+          ];
+
+          if (bool(process.env.GENERATE_SMALLER)) {
+            variants.push({
+              dir: path.join(rootOutputDir, "smaller"),
+              quality: num(process.env.SMALLER_QUALITY) || 65,
+              suffix: process.env.SMALLER_SUFFIX || "-smaller",
+              maxWidth: num(process.env.SMALLER_MAX_WIDTH),
+              maxHeight: num(process.env.SMALLER_MAX_HEIGHT),
+              format: "jpg"
+            });
+          }
+
+          if (bool(process.env.GENERATE_WEBP)) {
+            variants.push({
+              dir: path.join(rootOutputDir, "webp"),
+              quality: num(process.env.WEBP_QUALITY) || 78,
+              suffix: process.env.WEBP_SUFFIX || "-webp",
+              maxWidth: num(process.env.WEBP_MAX_WIDTH),
+              maxHeight: num(process.env.WEBP_MAX_HEIGHT),
+              format: "webp"
+            });
+          }
 
           async function pathExists(target) {
             try {
@@ -95,9 +161,11 @@ jobs:
 
           async function* walk(dir) {
             const entries = await fs.readdir(dir, { withFileTypes: true });
+
             for (const entry of entries) {
               const fullPath = path.join(dir, entry.name);
-              if (fullPath.startsWith(outputDir)) continue;
+
+              if (fullPath.startsWith(rootOutputDir)) continue;
 
               if (entry.isDirectory()) {
                 yield* walk(fullPath);
@@ -111,77 +179,77 @@ jobs:
             await fs.mkdir(dir, { recursive: true });
           }
 
-          function buildOutputPath(inputFile) {
+          function buildOutputPath(inputFile, variant) {
             const relative = path.relative(sourceDir, inputFile);
             const ext = path.extname(relative);
             const relativeWithoutExt = relative.slice(0, -ext.length);
-            return path.join(outputDir, `${relativeWithoutExt}${suffix}.jpg`);
+
+            return path.join(
+              variant.dir,
+              `${relativeWithoutExt}${variant.suffix}.${variant.format}`
+            );
           }
 
-          async function generateImage(inputFile, outputFile) {
+          async function shouldGenerate(inputFile, outputFile) {
+            if (!(await pathExists(outputFile))) return true;
+
+            const [srcStat, outStat] = await Promise.all([
+              fs.stat(inputFile),
+              fs.stat(outputFile)
+            ]);
+
+            return outStat.mtimeMs < srcStat.mtimeMs;
+          }
+
+          async function generateVariant(inputFile, outputFile, variant) {
             await ensureDir(path.dirname(outputFile));
 
             let pipeline = sharp(inputFile)
               .rotate()
               .flatten({ background: "#ffffff" });
 
-            if (Number.isFinite(maxWidth) || Number.isFinite(maxHeight)) {
+            if (variant.maxWidth || variant.maxHeight) {
               pipeline = pipeline.resize({
-                width: Number.isFinite(maxWidth) ? maxWidth : null,
-                height: Number.isFinite(maxHeight) ? maxHeight : null,
+                width: variant.maxWidth,
+                height: variant.maxHeight,
                 fit: "inside",
                 withoutEnlargement: true
               });
             }
 
-            await pipeline
-              .jpeg({
-                quality,
-                mozjpeg: true
-              })
-              .toFile(outputFile);
+            if (variant.format === "webp") {
+              await pipeline.webp({ quality: variant.quality }).toFile(outputFile);
+            } else {
+              await pipeline.jpeg({ quality: variant.quality, mozjpeg: true }).toFile(outputFile);
+            }
           }
 
           async function main() {
-            if (!(await pathExists(sourceDir))) {
-              console.log(`Source directory does not exist: ${sourceDir}`);
-              process.exit(0);
+            for (const variant of variants) {
+              await ensureDir(variant.dir);
             }
-
-            await ensureDir(outputDir);
 
             for await (const inputFile of walk(sourceDir)) {
               const ext = path.extname(inputFile).toLowerCase();
               if (!supportedExtensions.has(ext)) continue;
 
-              const outputFile = buildOutputPath(inputFile);
+              for (const variant of variants) {
+                const outputFile = buildOutputPath(inputFile, variant);
 
-              let shouldGenerate = true;
-
-              if (await pathExists(outputFile)) {
-                const [srcStat, outStat] = await Promise.all([
-                  fs.stat(inputFile),
-                  fs.stat(outputFile)
-                ]);
-
-                if (outStat.mtimeMs >= srcStat.mtimeMs) {
-                  shouldGenerate = false;
+                if (await shouldGenerate(inputFile, outputFile)) {
+                  console.log(`Generate: ${inputFile} -> ${outputFile}`);
+                  await generateVariant(inputFile, outputFile, variant);
+                } else {
+                  console.log(`Skip: ${outputFile}`);
                 }
-              }
-
-              if (shouldGenerate) {
-                console.log(`Generate: ${inputFile} -> ${outputFile}`);
-                await generateImage(inputFile, outputFile);
-              } else {
-                console.log(`Skip: ${outputFile}`);
               }
             }
 
             console.log("Done.");
           }
 
-          main().catch((error) => {
-            console.error(error);
+          main().catch(err => {
+            console.error(err);
             process.exit(1);
           });
           EOF
